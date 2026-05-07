@@ -13,8 +13,8 @@ const orderSchema = z.object({
   receiverName: z.string().min(1, '收件人姓名不能为空'),
   receiverPhone: z.string().regex(phoneRegex, '收件人电话格式错误（需为11位手机号）'),
   receiverAddress: z.string().min(1, '收件人地址不能为空'),
-  weight: z.number().positive('重量必须为正数'),
-  quantity: z.number().int('件数必须为整数').positive('件数必须为正整数'),
+  weight: z.string().min(1, '重量不能为空').refine(v => !isNaN(Number(v)) && Number(v) > 0, '重量必须为正数'),
+  quantity: z.string().min(1, '件数不能为空').refine(v => !isNaN(Number(v)) && Number.isInteger(Number(v)) && Number(v) > 0, '件数必须为正整数'),
   tempZone: z.enum(['常温', '冷藏', '冷冻'], '温层必须为：常温、冷藏或冷冻'),
   note: z.string().optional(),
 });
@@ -25,23 +25,13 @@ export function validateOrder(data: Record<string, unknown>, rowIndex: number): 
   
   // Try to parse each field
   try {
-    // Convert weight and quantity to numbers
-    if (data.weight !== undefined) {
-      const weight = Number(data.weight);
-      if (isNaN(weight)) {
-        errors.push({ row: rowIndex, field: 'weight', value: data.weight, message: '重量格式错误' });
-      } else {
-        data.weight = weight;
-      }
+    // Convert weight and quantity to strings for validation
+    if (data.weight !== undefined && data.weight !== null) {
+      data.weight = String(data.weight).trim();
     }
     
-    if (data.quantity !== undefined) {
-      const quantity = Number(data.quantity);
-      if (isNaN(quantity) || !Number.isInteger(quantity)) {
-        errors.push({ row: rowIndex, field: 'quantity', value: data.quantity, message: '件数格式错误' });
-      } else {
-        data.quantity = quantity;
-      }
+    if (data.quantity !== undefined && data.quantity !== null) {
+      data.quantity = String(data.quantity).trim();
     }
     
     // Validate tempZone
