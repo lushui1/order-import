@@ -19,8 +19,8 @@ model Order {
   receiverName  String
   receiverPhone String
   receiverAddress String
-  weight        Float
-  quantity      Int
+  weight        String
+  quantity      String
   tempZone      String
   note          String?
   createdAt     DateTime @default(now())

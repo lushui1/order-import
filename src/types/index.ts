@@ -8,8 +8,8 @@ export interface OrderData {
   receiverName: string;        // 收件人姓名（必填）
   receiverPhone: string;      // 收件人电话（必填）
   receiverAddress: string;    // 收件人地址（必填）
-  weight: number;              // 重量kg（必填，正数）
-  quantity: number;            // 件数（必填，正整数）
+  weight: string;              // 重量kg（必填，正数）
+  quantity: string;            // 件数（必填，正整数）
   tempZone: '常温' | '冷藏' | '冷冻';  // 温层（必填）
   note?: string;               // 备注（可选）
   createdAt?: Date;

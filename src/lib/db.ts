@@ -20,8 +20,8 @@ export interface OrderRecord {
   receiverName: string;
   receiverPhone: string;
   receiverAddress: string;
-  weight: number;
-  quantity: number;
+  weight: string;
+  quantity: string;
   tempZone: string;
   note?: string | null;
   createdAt: Date;
