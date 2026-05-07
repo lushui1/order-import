@@ -15,9 +15,7 @@ const orderSchema = z.object({
   receiverAddress: z.string().min(1, '收件人地址不能为空'),
   weight: z.number().positive('重量必须为正数'),
   quantity: z.number().int('件数必须为整数').positive('件数必须为正整数'),
-  tempZone: z.enum(['常温', '冷藏', '冷冻'], {
-    errorMap: () => ({ message: '温层必须为：常温、冷藏或冷冻' })
-  }),
+  tempZone: z.enum(['常温', '冷藏', '冷冻'], '温层必须为：常温、冷藏或冷冻'),
   note: z.string().optional(),
 });
 
@@ -87,7 +85,7 @@ export function validateOrders(
     const errors = validateOrder(orders[i], i + 1);
     
     if (errors.length === 0) {
-      validOrders.push(orders[i] as OrderData);
+      validOrders.push(orders[i] as unknown as OrderData);
     } else {
       allErrors.push(...errors);
     }
