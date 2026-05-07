@@ -4,7 +4,7 @@ import { OrderData, ValidationError } from '@/types';
 // Phone validation regex (Chinese mobile numbers)
 const phoneRegex = /^1[3-9]\d{9}$/;
 
-// Order schema for validation
+// Order schema - weight/quantity are plain strings, no strict numeric validation
 const orderSchema = z.object({
   externalCode: z.string().optional(),
   senderName: z.string().min(1, '发件人姓名不能为空'),
@@ -13,8 +13,8 @@ const orderSchema = z.object({
   receiverName: z.string().min(1, '收件人姓名不能为空'),
   receiverPhone: z.string().regex(phoneRegex, '收件人电话格式错误（需为11位手机号）'),
   receiverAddress: z.string().min(1, '收件人地址不能为空'),
-  weight: z.string().min(1, '重量不能为空').refine(v => !isNaN(Number(v)) && Number(v) > 0, '重量必须为正数'),
-  quantity: z.string().min(1, '件数不能为空').refine(v => !isNaN(Number(v)) && Number.isInteger(Number(v)) && Number(v) > 0, '件数必须为正整数'),
+  weight: z.string().min(1, '重量不能为空'),
+  quantity: z.string().min(1, '件数不能为空'),
   tempZone: z.enum(['常温', '冷藏', '冷冻'], '温层必须为：常温、冷藏或冷冻'),
   note: z.string().optional(),
 });
@@ -22,18 +22,16 @@ const orderSchema = z.object({
 // Validate a single order
 export function validateOrder(data: Record<string, unknown>, rowIndex: number): ValidationError[] {
   const errors: ValidationError[] = [];
-  
-  // Try to parse each field
+
   try {
-    // Convert weight and quantity to strings for validation
+    // Normalize weight/quantity to strings
     if (data.weight !== undefined && data.weight !== null) {
       data.weight = String(data.weight).trim();
     }
-    
     if (data.quantity !== undefined && data.quantity !== null) {
       data.quantity = String(data.quantity).trim();
     }
-    
+
     // Validate tempZone
     if (data.tempZone !== undefined) {
       const tempZone = String(data.tempZone).trim();
@@ -43,10 +41,9 @@ export function validateOrder(data: Record<string, unknown>, rowIndex: number): 
         data.tempZone = tempZone as '常温' | '冷藏' | '冷冻';
       }
     }
-    
+
     // Validate using zod
     const result = orderSchema.safeParse(data);
-    
     if (!result.success) {
       for (const issue of result.error.issues) {
         errors.push({
@@ -57,10 +54,10 @@ export function validateOrder(data: Record<string, unknown>, rowIndex: number): 
         });
       }
     }
-  } catch (error) {
+  } catch {
     errors.push({ row: rowIndex, field: 'unknown', value: data, message: '验证异常' });
   }
-  
+
   return errors;
 }
 
@@ -70,17 +67,16 @@ export function validateOrders(
 ): { validOrders: OrderData[]; errors: ValidationError[] } {
   const validOrders: OrderData[] = [];
   const allErrors: ValidationError[] = [];
-  
+
   for (let i = 0; i < orders.length; i++) {
     const errors = validateOrder(orders[i], i + 1);
-    
     if (errors.length === 0) {
       validOrders.push(orders[i] as unknown as OrderData);
     } else {
       allErrors.push(...errors);
     }
   }
-  
+
   // Check for duplicate external codes within batch
   const externalCodes = new Map<string, number>();
   for (let i = 0; i < orders.length; i++) {
@@ -98,7 +94,7 @@ export function validateOrders(
       }
     }
   }
-  
+
   return { validOrders, errors: allErrors };
 }
 

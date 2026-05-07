@@ -283,7 +283,7 @@ function findBestDataSheet(workbook: XLSX.WorkBook): { sheet: XLSX.WorkSheet; na
     const headerRow = detectHeaderRow(ws);
     const matchCount = countFieldMatches(ws, headerRow);
     
-    if (matchCount >= 5) {
+    if (matchCount >= 3) {
       return { sheet: ws, name: sheetName };
     }
   }
