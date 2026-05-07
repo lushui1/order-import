@@ -101,70 +101,128 @@ function findBestMatch(excelColumn: string): string | null {
   return bestMatch;
 }
 
-// Detect header row index
+// Propagate merged cell values to all cells in the merge range
+function expandMergedCells(ws: XLSX.WorkSheet): void {
+  const merges = (ws as Record<string, unknown>)['!merges'] as XLSX.Range[] | undefined;
+  if (!merges) return;
+
+  for (const merge of merges) {
+    // Get the top-left cell value
+    const topLeftCell = ws[XLSX.utils.encode_cell({ r: merge.s.r, c: merge.s.c })];
+    const value = topLeftCell?.v;
+    if (value === undefined || value === null) continue;
+
+    // Propagate to all cells in the merge range
+    for (let r = merge.s.r; r <= merge.e.r; r++) {
+      for (let c = merge.s.c; c <= merge.e.c; c++) {
+        if (r === merge.s.r && c === merge.s.c) continue; // Skip top-left
+        const cellRef = XLSX.utils.encode_cell({ r, c });
+        if (!ws[cellRef] || ws[cellRef].v === undefined || ws[cellRef].v === null) {
+          ws[cellRef] = { t: 's', v: value, w: String(value) };
+        }
+      }
+    }
+  }
+}
+
+// Detect header row index - supports multi-row headers with merged cells
 function detectHeaderRow(ws: XLSX.WorkSheet, maxRows: number = 10): number {
+  expandMergedCells(ws);
+
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
   const rows = range.e.r + 1;
-  
+
+  let bestRow = 0;
+  let bestFieldCount = 0;
+
   for (let i = 0; i < Math.min(rows, maxRows); i++) {
-    let hasContent = false;
     let fieldCount = 0;
-    
+    const rowValues: string[] = [];
+
     for (let col = range.s.c; col <= range.e.c; col++) {
       const cell = ws[XLSX.utils.encode_cell({ r: i, c: col })];
-      if (cell && cell.v && String(cell.v).trim()) {
-        hasContent = true;
-        const match = findBestMatch(String(cell.v).trim());
-        if (match) fieldCount++;
+      const val = cell?.v ? String(cell.v).trim() : '';
+      rowValues.push(val);
+      if (val && findBestMatch(val)) fieldCount++;
+    }
+
+    // Also check multi-row combination: this row's group + next row's field
+    if (i + 1 < rows && fieldCount < 3) {
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const cell1 = ws[XLSX.utils.encode_cell({ r: i, c: col })];
+        const cell2 = ws[XLSX.utils.encode_cell({ r: i + 1, c: col })];
+        const val1 = cell1?.v ? String(cell1.v).trim() : '';
+        const val2 = cell2?.v ? String(cell2.v).trim() : '';
+        if (val1 && val2 && val1 !== val2) {
+          const combined = val1 + val2;
+          if (findBestMatch(combined)) fieldCount++;
+        }
       }
     }
-    
-    // If we find at least 3 field matches, this is likely the header row
-    if (hasContent && fieldCount >= 3) {
-      return i;
+
+    if (fieldCount > bestFieldCount) {
+      bestFieldCount = fieldCount;
+      bestRow = i;
     }
   }
-  
-  return 0; // Default to first row
+
+  return bestFieldCount >= 2 ? bestRow : 0;
 }
 
-// Detect data start row (skip header and empty rows)
-function detectDataStartRow(ws: XLSX.WorkSheet, headerRow: number): number {
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  const rows = range.e.r + 1;
-  
-  for (let i = headerRow + 1; i < rows; i++) {
-    let hasContent = false;
-    for (let col = range.s.c; col <= range.e.c; col++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: i, c: col })];
-      if (cell && cell.v && String(cell.v).trim()) {
-        hasContent = true;
-        break;
-      }
-    }
-    if (hasContent) return i;
-  }
-  
-  return headerRow + 1;
-}
 
-// Create column mapping from header row
+// Create column mapping from header row - supports multi-row headers
 function createColumnMapping(ws: XLSX.WorkSheet, headerRow: number): Record<string, string> {
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
   const mapping: Record<string, string> = {};
-  
+
+  // Try single-row header first
+  let singleRowMatches = 0;
   for (let col = range.s.c; col <= range.e.c; col++) {
     const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c: col })];
-    if (cell && cell.v) {
-      const excelColName = String(cell.v).trim();
-      const systemField = findBestMatch(excelColName);
+    if (cell?.v && findBestMatch(String(cell.v).trim())) singleRowMatches++;
+  }
+
+  if (singleRowMatches >= 3) {
+    // Single-row header works
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c: col })];
+      if (cell?.v) {
+        const excelColName = String(cell.v).trim();
+        const systemField = findBestMatch(excelColName);
+        if (systemField) {
+          mapping[XLSX.utils.encode_col(col)] = systemField;
+        }
+      }
+    }
+  } else {
+    // Multi-row header: combine group row + sub-header row
+    const groupRow = headerRow;
+    const subRow = headerRow + 1;
+
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const groupCell = ws[XLSX.utils.encode_cell({ r: groupRow, c: col })];
+      const subCell = ws[XLSX.utils.encode_cell({ r: subRow, c: col })];
+      const groupVal = groupCell?.v ? String(groupCell.v).trim() : '';
+      const subVal = subCell?.v ? String(subCell.v).trim() : '';
+
+      // Try: group+sub combined, then sub alone, then group alone
+      let systemField: string | null = null;
+      if (groupVal && subVal && groupVal !== subVal) {
+        systemField = findBestMatch(groupVal + subVal);
+      }
+      if (!systemField && subVal) {
+        systemField = findBestMatch(subVal);
+      }
+      if (!systemField && groupVal) {
+        systemField = findBestMatch(groupVal);
+      }
+
       if (systemField) {
-        const colLetter = XLSX.utils.encode_col(col);
-        mapping[colLetter] = systemField;
+        mapping[XLSX.utils.encode_col(col)] = systemField;
       }
     }
   }
-  
+
   return mapping;
 }
 
@@ -173,53 +231,75 @@ export function parseExcelSheet(
   ws: XLSX.WorkSheet,
   options?: { onProgress?: (current: number, total: number) => void }
 ): { headers: string[]; data: RawExcelRow[]; mapping: Record<string, string> } {
+  expandMergedCells(ws);
+
   const headerRow = detectHeaderRow(ws);
-  const dataStartRow = detectDataStartRow(ws, headerRow);
   const mapping = createColumnMapping(ws, headerRow);
-  
+
+  // Detect if multi-row header (check if createColumnMapping used sub-row)
+  let dataStartRow = headerRow + 1;
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  let singleRowMatches = 0;
+  for (let col = range.s.c; col <= range.e.c; col++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c: col })];
+    if (cell?.v && findBestMatch(String(cell.v).trim())) singleRowMatches++;
+  }
+  if (singleRowMatches < 3) {
+    // Multi-row header, skip one more row
+    dataStartRow = headerRow + 2;
+  }
+
+  // Skip empty rows between header and data
+  while (dataStartRow <= range.e.r) {
+    let hasContent = false;
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: dataStartRow, c: col })];
+      if (cell?.v && String(cell.v).trim()) { hasContent = true; break; }
+    }
+    if (hasContent) break;
+    dataStartRow++;
+  }
+
   const totalRows = range.e.r - dataStartRow + 1;
-  
   const data: RawExcelRow[] = [];
-  
+
   for (let row = dataStartRow; row <= range.e.r; row++) {
     const rowData: RawExcelRow = {};
     let hasAnyContent = false;
-    
+
     for (let col = range.s.c; col <= range.e.c; col++) {
       const colLetter = XLSX.utils.encode_col(col);
       const systemField = mapping[colLetter];
-      
+
       if (systemField) {
         const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })];
         const value = cell?.v;
-        
+
         if (value !== undefined && value !== null && String(value).trim() !== '') {
           hasAnyContent = true;
           rowData[systemField] = typeof value === 'number' ? value : String(value).trim();
         }
       }
     }
-    
+
     if (hasAnyContent) {
       data.push(rowData);
     }
-    
-    // Report progress
+
     if (options?.onProgress) {
       options.onProgress(row - dataStartRow + 1, totalRows);
     }
   }
-  
+
   // Get header names for template fingerprinting
   const headers: string[] = [];
   for (let col = range.s.c; col <= range.e.c; col++) {
     const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c: col })];
-    if (cell && cell.v) {
+    if (cell?.v) {
       headers.push(String(cell.v).trim());
     }
   }
-  
+
   return { headers, data, mapping };
 }
 
