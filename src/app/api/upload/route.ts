@@ -44,6 +44,22 @@ export async function POST(request: NextRequest) {
       console.log('[UPLOAD] No saved template rule found');
     }
     
+    // Build auto-detected mapping: {excelColName: systemField}
+    // colMapping is {colLetter: systemField}, need to convert to {excelColName: systemField}
+    const autoMapping: Record<string, string> = {};
+    for (const [colLetter, systemField] of Object.entries(result.colMapping)) {
+      // Convert colLetter ("A", "B", "AA", etc.) to column index
+      let colIndex = 0;
+      for (let i = 0; i < colLetter.length; i++) {
+        colIndex = colIndex * 26 + (colLetter.charCodeAt(i) - 64);
+      }
+      colIndex -= 1; // 0-based
+      if (colIndex >= 0 && colIndex < result.headers.length) {
+        autoMapping[result.headers[colIndex]] = systemField;
+      }
+    }
+    console.log('[UPLOAD] Auto-mapped fields:', Object.keys(autoMapping).length, autoMapping);
+    
     // Save import record
     const batchId = `batch_${Date.now()}`;
     try {
@@ -69,7 +85,7 @@ export async function POST(request: NextRequest) {
       errors: validation.errors,
       fingerprint,
       hasSavedMapping: !!savedRule,
-      mapping: savedRule?.mapping || {},
+      mapping: savedRule?.mapping || autoMapping,
     });
   } catch (error) {
     console.error('[UPLOAD] Error:', error);

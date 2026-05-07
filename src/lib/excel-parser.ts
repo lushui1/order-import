@@ -230,7 +230,7 @@ export async function parseExcelFile(
     sheetIndex?: number; 
     onProgress?: (current: number, total: number) => void 
   }
-): Promise<{ data: RawExcelRow[]; headers: string[]; sheetName: string }> {
+): Promise<{ data: RawExcelRow[]; headers: string[]; sheetName: string; colMapping: Record<string, string> }> {
   // In Node.js environment (API route), use arrayBuffer() directly
   const arrayBuffer = await file.arrayBuffer();
   const data = new Uint8Array(arrayBuffer);
@@ -263,6 +263,7 @@ export async function parseExcelFile(
     data: result.data,
     headers: result.headers,
     sheetName,
+    colMapping: result.mapping,
   };
 }
 
