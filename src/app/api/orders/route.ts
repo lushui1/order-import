@@ -1,31 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// In-memory store for orders (will be replaced with database)
-// Using a global variable to persist across requests in dev mode
-const globalForOrders = globalThis as unknown as {
-  orders: OrderRecord[];
-};
-
-if (!globalForOrders.orders) {
-  globalForOrders.orders = [];
-}
-
-interface OrderRecord {
-  id: string;
-  externalCode?: string;
-  senderName: string;
-  senderPhone: string;
-  senderAddress: string;
-  receiverName: string;
-  receiverPhone: string;
-  receiverAddress: string;
-  weight: number;
-  quantity: number;
-  tempZone: string;
-  note?: string;
-  createdAt: string;
-  batchId: string;
-}
+import { v4 as uuidv4 } from 'uuid';
+import {
+  saveOrder,
+  getOrders,
+  checkExternalCodeExists,
+  batchCheckExternalCodes,
+} from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,29 +22,73 @@ export async function POST(request: NextRequest) {
     const batchId = `batch_${Date.now()}`;
     let successCount = 0;
     let failCount = 0;
+    const duplicateErrors: { row: number; field: string; message: string }[] = [];
 
+    // Check for duplicates with existing orders in DB
+    const externalCodes = orders
+      .map((o: Record<string, unknown>) => String(o.externalCode || '').trim())
+      .filter((code: string) => code);
+
+    if (externalCodes.length > 0) {
+      const existingMap = await batchCheckExternalCodes(externalCodes);
+      
+      orders.forEach((order: Record<string, unknown>, i: number) => {
+        const code = String(order.externalCode || '').trim();
+        if (code && existingMap.get(code)) {
+          duplicateErrors.push({
+            row: i + 1,
+            field: 'externalCode',
+            message: `外部编码 "${code}" 已存在`,
+          });
+        }
+      });
+
+      // Also check batch-internal duplicates
+      const seenCodes = new Set<string>();
+      orders.forEach((order: Record<string, unknown>, i: number) => {
+        const code = String(order.externalCode || '').trim();
+        if (code && seenCodes.has(code) && !duplicateErrors.some(e => e.row === i + 1)) {
+          duplicateErrors.push({
+            row: i + 1,
+            field: 'externalCode',
+            message: `外部编码 "${code}" 在本批次中重复`,
+          });
+        }
+        if (code) seenCodes.add(code);
+      });
+    }
+
+    // If duplicates found, return error
+    if (duplicateErrors.length > 0) {
+      return NextResponse.json({
+        success: false,
+        error: '发现重复的外部编码',
+        duplicateErrors,
+        successCount: 0,
+        failCount: orders.length,
+      });
+    }
+
+    // Save orders
     for (const order of orders) {
       try {
-        const record: OrderRecord = {
-          id: `ord_${Date.now()}_${successCount}`,
-          externalCode: order.externalCode,
-          senderName: order.senderName,
-          senderPhone: order.senderPhone,
-          senderAddress: order.senderAddress,
-          receiverName: order.receiverName,
-          receiverPhone: order.receiverPhone,
-          receiverAddress: order.receiverAddress,
-          weight: Number(order.weight),
-          quantity: Number(order.quantity),
-          tempZone: order.tempZone,
-          note: order.note,
-          createdAt: new Date().toISOString(),
+        await saveOrder({
+          externalCode: order.externalCode || null,
+          senderName: String(order.senderName || ''),
+          senderPhone: String(order.senderPhone || ''),
+          senderAddress: String(order.senderAddress || ''),
+          receiverName: String(order.receiverName || ''),
+          receiverPhone: String(order.receiverPhone || ''),
+          receiverAddress: String(order.receiverAddress || ''),
+          weight: Number(order.weight) || 0,
+          quantity: Number(order.quantity) || 0,
+          tempZone: String(order.tempZone || '常温'),
+          note: order.note ? String(order.note) : null,
           batchId,
-        };
-        
-        globalForOrders.orders.push(record);
+        });
         successCount++;
-      } catch {
+      } catch (error) {
+        console.error('[ORDERS] Save error:', error);
         failCount++;
       }
     }
@@ -77,6 +101,7 @@ export async function POST(request: NextRequest) {
       total: orders.length,
     });
   } catch (error) {
+    console.error('[ORDERS] POST error:', error);
     return NextResponse.json(
       { success: false, error: '提交失败' },
       { status: 500 }
@@ -92,33 +117,23 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || '';
     const searchField = searchParams.get('field') || 'receiverName';
 
-    let filtered = [...globalForOrders.orders];
-
-    // Apply search filter
-    if (search) {
-      filtered = filtered.filter(order => {
-        const fieldValue = String(order[searchField as keyof OrderRecord] || '');
-        return fieldValue.toLowerCase().includes(search.toLowerCase());
-      });
-    }
-
-    // Sort by createdAt descending
-    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    // Paginate
-    const total = filtered.length;
-    const start = (page - 1) * pageSize;
-    const paginatedOrders = filtered.slice(start, start + pageSize);
+    const { orders, total } = await getOrders({
+      page,
+      pageSize,
+      search,
+      searchField,
+    });
 
     return NextResponse.json({
       success: true,
-      orders: paginatedOrders,
+      orders,
       total,
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
     });
   } catch (error) {
+    console.error('[ORDERS] GET error:', error);
     return NextResponse.json(
       { success: false, error: '查询失败' },
       { status: 500 }

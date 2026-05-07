@@ -231,50 +231,39 @@ export async function parseExcelFile(
     onProgress?: (current: number, total: number) => void 
   }
 ): Promise<{ data: RawExcelRow[]; headers: string[]; sheetName: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-        
-        // Find the best sheet for order data
-        let targetSheet: XLSX.WorkSheet;
-        let sheetName: string;
-        
-        if (options?.sheetIndex !== undefined) {
-          const sheetNames = workbook.SheetNames;
-          if (options.sheetIndex < sheetNames.length) {
-            sheetName = sheetNames[options.sheetIndex];
-            targetSheet = workbook.Sheets[sheetName];
-          } else {
-            throw new Error(`Sheet index ${options.sheetIndex} out of range`);
-          }
-        } else {
-          // Auto-detect best sheet
-          const bestSheet = findBestDataSheet(workbook);
-          targetSheet = bestSheet.sheet;
-          sheetName = bestSheet.name;
-        }
-        
-        const result = parseExcelSheet(targetSheet, {
-          onProgress: options?.onProgress
-        });
-        
-        resolve({
-          data: result.data,
-          headers: result.headers,
-          sheetName,
-        });
-      } catch (error) {
-        reject(error);
-      }
-    };
-    
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsArrayBuffer(file);
+  // In Node.js environment (API route), use arrayBuffer() directly
+  const arrayBuffer = await file.arrayBuffer();
+  const data = new Uint8Array(arrayBuffer);
+  const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+  
+  // Find the best sheet for order data
+  let targetSheet: XLSX.WorkSheet;
+  let sheetName: string;
+  
+  if (options?.sheetIndex !== undefined) {
+    const sheetNames = workbook.SheetNames;
+    if (options.sheetIndex < sheetNames.length) {
+      sheetName = sheetNames[options.sheetIndex];
+      targetSheet = workbook.Sheets[sheetName];
+    } else {
+      throw new Error(`Sheet index ${options.sheetIndex} out of range`);
+    }
+  } else {
+    // Auto-detect best sheet
+    const bestSheet = findBestDataSheet(workbook);
+    targetSheet = bestSheet.sheet;
+    sheetName = bestSheet.name;
+  }
+  
+  const result = parseExcelSheet(targetSheet, {
+    onProgress: options?.onProgress
   });
+  
+  return {
+    data: result.data,
+    headers: result.headers,
+    sheetName,
+  };
 }
 
 // Find the best sheet for order data

@@ -5,18 +5,16 @@ import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 
 interface FileUploadProps {
-  onUploadSuccess: (data: UploadResult) => void;
+  onUploadSuccess: (result: {
+    data: Record<string, unknown>[];
+    headers: string[];
+    errors: ValidationError[];
+    fingerprint: string;
+    hasSavedMapping: boolean;
+    mapping?: Record<string, string>;
+  }) => void;
   onUploadError: (error: string) => void;
-}
-
-interface UploadResult {
-  success: boolean;
-  data: Record<string, unknown>[];
-  headers: string[];
-  sheetName: string;
-  totalRows: number;
-  validRows: number;
-  errors: ValidationError[];
+  onParseProgress?: (current: number, total: number) => void;
 }
 
 interface ValidationError {
@@ -26,7 +24,7 @@ interface ValidationError {
   message: string;
 }
 
-export default function FileUpload({ onUploadSuccess, onUploadError }: FileUploadProps) {
+export default function FileUpload({ onUploadSuccess, onUploadError, onParseProgress }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -36,71 +34,110 @@ export default function FileUpload({ onUploadSuccess, onUploadError }: FileUploa
     setIsUploading(true);
 
     try {
+      // Validate file type
+      const validExtensions = ['.xlsx', '.xls', '.csv'];
+      const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      
+      if (!validExtensions.includes(fileExt)) {
+        onUploadError('请上传 .xlsx、.xls 或 .csv 格式的文件');
+        setIsUploading(false);
+        return;
+      }
+
+      // Simulate parse progress for better UX
+      if (onParseProgress) {
+        onParseProgress(0, 100);
+      }
+
       const formData = new FormData();
       formData.append('file', file);
+      
+      if (onParseProgress) {
+        onParseProgress(30, 100);
+      }
 
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       });
 
-      const result: UploadResult = await response.json();
+      if (onParseProgress) {
+        onParseProgress(70, 100);
+      }
+
+      const result = await response.json();
+
+      if (onParseProgress) {
+        onParseProgress(100, 100);
+      }
 
       if (result.success) {
-        toast.success(`成功解析 ${result.totalRows} 条数据`);
-        onUploadSuccess(result);
+        onUploadSuccess({
+          data: result.data,
+          headers: result.headers,
+          errors: result.errors || [],
+          fingerprint: result.fingerprint || '',
+          hasSavedMapping: result.hasSavedMapping || false,
+          mapping: result.mapping,
+        });
+        toast.success(`成功解析 ${result.data.length} 行数据`);
       } else {
-        toast.error(result.errors?.[0]?.message || '解析失败');
-        onUploadError(result.errors?.[0]?.message || '解析失败');
+        onUploadError(result.error || '解析失败');
       }
     } catch (error) {
-      toast.error('上传失败，请重试');
+      console.error('Upload error:', error);
       onUploadError('上传失败，请重试');
     } finally {
       setIsUploading(false);
     }
-  }, [onUploadSuccess, onUploadError]);
+  }, [onUploadSuccess, onUploadError, onParseProgress]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/vnd.ms-excel': ['.xls'],
+      'text/csv': ['.csv'],
     },
-    maxFiles: 1,
-    maxSize: 10 * 1024 * 1024, // 10MB
+    multiple: false,
+    maxSize: 50 * 1024 * 1024, // 50MB
   });
 
   return (
-    <div className="w-full">
-      <div
-        {...getRootProps()}
-        className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer
-          ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}
-          ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
-      >
-        <input {...getInputProps()} disabled={isUploading} />
-        
+    <div
+      {...getRootProps()}
+      className={`
+        border-2 border-dashed rounded-xl p-12
+        transition-colors cursor-pointer
+        ${isDragActive 
+          ? 'border-blue-500 bg-blue-50' 
+          : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+        }
+        ${isUploading ? 'opacity-50 pointer-events-none' : ''}
+      `}
+    >
+      <input {...getInputProps()} />
+      
+      <div className="text-center">
         {isUploading ? (
-          <div className="flex flex-col items-center gap-3">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-            <p className="text-gray-600">正在解析文件...</p>
-          </div>
-        ) : isDragActive ? (
-          <div className="flex flex-col items-center gap-3">
-            <svg className="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            <p className="text-blue-600 font-medium">松开鼠标上传文件</p>
-          </div>
+          <>
+            <div className="w-16 h-16 mx-auto mb-4 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-gray-600 font-medium">正在解析文件...</p>
+          </>
         ) : (
-          <div className="flex flex-col items-center gap-3">
-            <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p className="text-gray-600">拖拽 Excel 文件到这里，或点击选择文件</p>
-            <p className="text-gray-400 text-sm">支持 .xlsx 和 .xls 格式，最大 10MB</p>
-          </div>
+          <>
+            <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
+            <p className="text-lg font-medium text-gray-900 mb-2">
+              {isDragActive ? '松开以上传文件' : '拖拽文件到此处，或点击上传'}
+            </p>
+            <p className="text-sm text-gray-500">
+              支持 .xlsx、.xls、.csv 格式，最大 50MB
+            </p>
+          </>
         )}
       </div>
     </div>

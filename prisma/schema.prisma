@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = []
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL")
+}
+
+// 订单表
+model Order {
+  id            String   @id @default(uuid())
+  externalCode  String?  @unique
+  senderName    String
+  senderPhone   String
+  senderAddress String
+  receiverName  String
+  receiverPhone String
+  receiverAddress String
+  weight        Float
+  quantity      Int
+  tempZone      String
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  batchId       String
+  
+  @@index([externalCode])
+  @@index([receiverName])
+  @@index([createdAt])
+  @@index([batchId])
+}
+
+// 导入记录表
+model ImportRecord {
+  id          String   @id @default(uuid())
+  filename    String
+  sheetName   String
+  totalRows   Int
+  successCount Int
+  failCount   Int
+  createdAt   DateTime @default(now())
+  batchId     String
+  
+  @@index([createdAt])
+  @@index([batchId])
+}
+
+// 模板规则表
+model TemplateRule {
+  id          String   @id @default(uuid())
+  fingerprint String   @unique
+  mapping     String   // JSON string
+  headers     String   // JSON array string
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([fingerprint])
+}
